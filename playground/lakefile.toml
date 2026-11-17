@@ -16,3 +16,23 @@ srcDir = "example01-c"
 name = "Example02C"
 srcDir = "example02-c"
 roots = ["QuicksortSpec", "QuicksortPartition", "QuicksortMachine", "QuicksortBinary"]
+
+[[lean_lib]]
+name = "Example03C"
+srcDir = "example03-c"
+roots = ["CountedExecution", "QuicksortCountedCall", "QuicksortPartitionCost",
+    "QuicksortDriverCost", "QuicksortCostInput", "QuicksortCost"]
+
+[[lean_lib]]
+name = "Example04Rust"
+srcDir = "example04-rust"
+roots = [
+    "QuickselectMachine", "QuickselectSanity", "QuickselectSpec",
+    "QuickselectPivot", "QuickselectCost", "QuickselectRoundTrace", "QuickselectBounds",
+    "QuickselectArray", "QuickselectLeftScan", "QuickselectRightScan", "QuickselectSwap",
+    "QuickselectPartitionScan", "QuickselectPartitionInvariant", "QuickselectMachineTail",
+    "QuickselectDriverControl", "QuickselectDriverStack", "QuickselectPartitionStart",
+    "QuickselectDriver", "QuickselectPivotMachine", "QuickselectDriverPivot", "QuickselectRounds",
+    "QuickselectAdversaryPivot", "QuickselectAdversaryPartition", "QuickselectAdversary",
+    "QuickselectAdversaryMachine", "QuickselectReinitialize",
+    "QuickselectUpper", "QuickselectLower", "QuickselectWorstCase"]

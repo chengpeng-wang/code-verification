@@ -21,8 +21,10 @@ def words : List (BitVec 32) :=
    0x3820690c#32, 0x3900016d#32, 0x17fffff6#32, 0xaa1f03e0#32,
    0x3860690a#32, 0x3900010a#32, 0x38206909#32, 0xd65f03c0#32]
 
-/-- The partition returns the number of elements smaller than the pivot. The
-array contains a permutation of its input, with the pivot at that index. -/
+/-- Partition contract for a nonempty writable input array whose first byte is
+`pivot`. On return, X0 gives the pivot's index in the same array. The preceding
+bytes are strictly less than the pivot, the following bytes are greater than or
+equal to it, and the whole array is a permutation of the input. -/
 def spec (base : Addr) (pivot : Byte) (tail : List Byte) : Arm64.Spec Unit where
   pre := fun _ s =>
     ⌜s.readReg64 .x0 = base ∧ s.readReg64 .x1 = BitVec.ofNat 64 (pivot :: tail).length ∧

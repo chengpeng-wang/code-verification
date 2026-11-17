@@ -1,5 +1,7 @@
 # AlphaProof Code Playground
 
+新增验证例子时，先在规格和主定理旁注释要证明的性质，再在该例子的 README 中列出供审阅的主定理、输入前提、实际输出和保证。提交证明结果时指出这些位置，方便先核对目标，再检查证明。
+
 ## Example 1 — C
 
 用 ARM64 机器语义证明 [`store_byte.c`](example01-c/store_byte.c) 编译出来的函数会把参数 `value` 写到 `*dst`，保留相邻的一个字节，然后返回调用者。
@@ -35,7 +37,7 @@ store_byte.c  ── Clang ──▶  AArch64 ELF 对象文件 (.o)
 
 ## Example 02 — C 快速排序
 
-[`quicksort.c`](example02-c/quicksort.c) 的入口是 `quicksort_u8(a, n)`，对 `n` 个 `uint8_t` 原地排序。`n` 由调用者传入，长度为 0 或 1 时直接返回。[分区函数](example02-c/quicksort_partition.c) 取首元素作为枢轴，将小于它的元素移到左边，将大于或等于它的元素留在右边，然后把枢轴放在中间。快速排序递归处理这两个子数组。
+证明 `quicksort_u8(a, n)` 的 ARM64 机器码会正常返回，并在原数组地址写回输入的升序排列。审阅时先检查主定理中的 `output` 和 `Spec.Sorts input output`。例子目录里的 README 列出了调用前提、返回保证和各证明文件的用途。 [Example 02 的证明目标](example02-c/README.md#先审阅证明目标)
 
 在 `DeepMindDemo` 目录运行以下命令。
 
@@ -43,15 +45,18 @@ store_byte.c  ── Clang ──▶  AArch64 ELF 对象文件 (.o)
 ./playground/example02-c/check.sh
 ```
 
-此例还需要支持 AArch64 的 `ld.lld`。如果找不到 `ld.lld`，脚本会尝试本机 Rust stable 工具链里的 `rust-lld`。脚本用 Clang 18.1.3 的 ARMv8-A、`-O1` 产物开发，保留两次递归调用以便对照反汇编读证明。链接会解析三条 `bl` 指令的目标，包括一次调用分区函数和两次递归调用。
+## Example 03 — C 快速排序的最坏复杂度
 
-| 文件 | 验证内容 |
-| --- | --- |
-| [`QuicksortSpec.lean`](example02-c/QuicksortSpec.lean) | 定义升序且保留元素及其出现次数的规格，证明递归参考算法满足它，并提供分区循环不变量。 |
-| [`QuicksortPartition.lean`](example02-c/QuicksortPartition.lean) | 在 ARM64 模型里证明分区函数的循环会结束，写回输入的一个排列，并在 `X0` 返回正确的枢轴位置。 |
-| [`QuicksortMachine.lean`](example02-c/QuicksortMachine.lean) | 证明主函数指令流。分区后的两个子数组都更短，证明通过对长度归纳得到两个递归调用的契约。 |
-| [`QuicksortBinary.lean`](example02-c/QuicksortBinary.lean) | 读取本次链接出的 184 个机器码字节，由 Lean 内核核对两段指令序列，再将指令证明应用到这份二进制。 |
+对同一份快排 ARM64 机器码证明首次返回的指令数具有最坏情况二次界。先核对通用上界与全相等输入的下界是否符合要验证的目标。 [Example 03 的证明目标](example03-c/README.md#先审阅证明目标)
 
-从 `quicksort_returns_sorted` 可以直接读出机器定理。入口状态的 `X0` 是数组指针，`X1` 是输入长度，`PC` 是代码入口，`LR` 是返回地址。代码需完整装载在可执行内存中，数组字节可读写，初始栈指针满足 16 字节对齐。证明采用 `48 * n` 字节的充分栈空间预算，每个实际进入递归分支的调用使用 48 字节。栈和数组的分离断言要求它们不重叠。结论是程序返回到初始 `LR`，栈指针和被调用者保存寄存器恢复，数组内容为原输入的无符号升序排列，并保留调用者通过 `frame` 描述的分离内存。
+```bash
+./playground/example03-c/check.sh
+```
 
-运行后，`example02-c/build/quicksort_u8.asm` 是反汇编，`quicksort_u8.elf` 是链接结果，`quicksort_u8.bin` 是从 ELF 提取的 `.text` 原始字节。Lean 每次重新读取 `.bin`。修改 C 或编译选项后，如果机器码发生变化，脚本会在长度或指令字核对时指出差异。
+## Example 04 — Rust Hoare Quickselect
+
+将原 Hoare Quickselect 改写为可链接、可由 ARM64 模型执行的 Rust 程序。证明这份机器码的最坏指令数具有同阶上下界。 [Example 04 的证明目标](example04-rust/README.md#先审阅证明目标)
+
+```bash
+./playground/example04-rust/check.sh
+```

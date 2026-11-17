@@ -6,7 +6,9 @@ set_option autoImplicit false
 
 variable {width : Nat}
 
-/-- Sort in unsigned ascending order while preserving every element and its multiplicity. -/
+/-- The sorting property for the input list and the bytes read back from memory.
+`Pairwise (· ≤ ·)` requires nondecreasing unsigned order. `Perm` requires the same
+number of occurrences of each value, including duplicates. -/
 def Sorts (input output : List (BitVec width)) : Prop :=
   output.Pairwise (· ≤ ·) ∧ output.Perm input
 
@@ -143,51 +145,5 @@ theorem PartitionScan.finish {input arr : List (BitVec width)} {pivot : BitVec w
     rw [← getElem!_pos out (k + 1 + j) hj', swap_getElem! (by omega)]
     simpa [show k + 1 + j ≠ 0 by omega, show k + 1 + j ≠ k by omega] using
       h.rightBound (k + 1 + j) (by omega) (by omega)
-
-/-- The two partitions use complementary predicates, so each element goes to exactly one side. -/
-def below (pivot : BitVec width) (xs : List (BitVec width)) : List (BitVec width) :=
-  xs.filter (fun x => x.ult pivot)
-
-def atLeast (pivot : BitVec width) (xs : List (BitVec width)) : List (BitVec width) :=
-  xs.filter (fun x => !x.ult pivot)
-
-/-- Use the first element as the pivot and recursively sort both partitions of the tail. -/
-def quicksort : List (BitVec width) → List (BitVec width)
-  | [] => []
-  | pivot :: xs => quicksort (below pivot xs) ++ pivot :: quicksort (atLeast pivot xs)
-termination_by xs => xs.length
-decreasing_by
-  all_goals exact Nat.lt_succ_of_le (List.length_filter_le _ _)
-
-theorem quicksort_sorts (xs : List (BitVec width)) : Sorts xs (quicksort xs) := by
-  cases xs with
-  | nil => simp [quicksort, Sorts]
-  | cons pivot xs =>
-    rw [quicksort]
-    apply sorts_partition (List.perm_middle.trans ((List.filter_append_perm _ _).cons pivot))
-      ?_ ?_ (quicksort_sorts (below pivot xs)) (quicksort_sorts (atLeast pivot xs))
-    · intro x hx
-      exact BitVec.ult_iff_lt.mp (List.mem_filter.mp hx).2
-    · intro x hx
-      have h := (List.mem_filter.mp hx).2
-      simpa [BitVec.ult_eq_decide_lt] using h
-termination_by xs.length
-decreasing_by
-  all_goals exact Nat.lt_succ_of_le (List.length_filter_le _ _)
-
-/-- A machine implementation can use in-place swaps and a different order within each
-partition. Its sorted permutation still equals the reference result. -/
-theorem eq_quicksort_of_sorts {input output : List (BitVec width)}
-    (h : Sorts input output) : output = quicksort input := by
-  have ref := quicksort_sorts input
-  exact List.Perm.eq_of_pairwise (fun _ _ _ _ => BitVec.le_antisymm)
-    h.1 ref.1 (h.2.trans ref.2.symm)
-
-@[simp] theorem quicksort_nil : quicksort ([] : List (BitVec width)) = [] := by
-  rw [quicksort]
-
-@[simp] theorem quicksort_singleton (x : BitVec width) : quicksort [x] = [x] := by
-  rw [quicksort]
-  simp [below, atLeast]
 
 end Example02C.Spec

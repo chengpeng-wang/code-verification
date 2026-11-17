@@ -20,19 +20,22 @@ def quicksortWords : List (BitVec 32) :=
    0x8b140121#32, 0x97ffffef#32, 0xa9424ff4#32, 0xf9400bf5#32,
    0xa8c37bfd#32, 0xd65f03c0#32]
 
-/-- The caller supplies the array in X0 and its length in X1, along with a writable
-stack region of 48 bytes per available frame. The array holds the reference
-quicksort result on return, and the caller regains the writable stack region. -/
+/-- Machine contract for sorting in place. At entry, X0 points to the writable
+input bytes, X1 gives their length, and the caller provides 48 writable stack bytes
+per budgeted frame. On return, `output` names the bytes at the original X0 address
+and satisfies `Spec.Sorts input output`. The stack region is writable again at the
+entry stack pointer, with its contents left unspecified. -/
 def quicksortSpec (base : Addr) (input : List Byte) (stackFrames : Nat) : Arm64.Spec Unit where
   pre := fun _ s => ⌜s.readReg64 .x0 = base ∧ s.readReg64 .x1 = BitVec.ofNat 64 input.length⌝ ∗
     (base ↦ₛ input) ∗ stackAt s.sp (48 * stackFrames)
-  post := fun _ s0 _ => (base ↦ₛ Spec.quicksort input) ∗ stackAt s0.sp (48 * stackFrames)
+  post := fun _ s0 _ => ∃∗ output : List Byte,
+    ⌜Spec.Sorts input output⌝ ∗ (base ↦ₛ output) ∗ stackAt s0.sp (48 * stackFrames)
 
-private theorem small_quicksort (input : List Byte) (h : input.length < 2) :
-    Spec.quicksort input = input := by
+private theorem small_input_sorts (input : List Byte) (h : input.length < 2) :
+    Spec.Sorts input input := by
   rcases input with _ | ⟨x, _ | ⟨y, xs⟩⟩
-  · exact Spec.quicksort_nil
-  · exact Spec.quicksort_singleton x
+  · simp [Spec.Sorts]
+  · simp [Spec.Sorts]
   · simp at h; omega
 
 private theorem quicksort_words_aux (prog : Program) (entry : Addr)
@@ -77,9 +80,17 @@ private theorem quicksort_words_aux (prog : Program) (entry : Addr)
     wp_if hshort
     · simp only [BitVec.ult_eq_decide, decide_eq_true_eq, BitVec.toNat_ofNat,
         Nat.mod_eq_of_lt hnfit] at hshort
-      simp only [small_quicksort input (by omega)]
+      have hsorted := small_input_sorts input (by omega)
       wp_step
-      wp_done
+      apply SepWP.done (by wp_norm_lhs) (by wp_norm_lhs)
+      refine ⟨?_, ?_, ?_⟩
+      · intro hm
+        rw [sepExists_sepConj_left, satisfies_sepExists]
+        refine ⟨input, ?_⟩
+        rw [sepConj_assoc, satisfies_pure_sepConj]
+        exact ⟨hsorted, hm⟩
+      · wp_norm_lhs
+      · simp [CalleeSavedPreserved, wp_norm, arm64_norm, *]
     · simp only [BitVec.ult_eq_decide, decide_eq_true_eq, BitVec.toNat_ofNat,
         Nat.mod_eq_of_lt hnfit] at hshort
       have hlong : 2 ≤ n := by omega
@@ -109,6 +120,8 @@ private theorem quicksort_words_aux (prog : Program) (entry : Addr)
         wp_conv_pre => rw [pointsToBytes_append, pointsToBytes_cons_off, sepConj_assoc]
         wp_steps
         wp_call leftOk ()
+        revert w
+        intro sortedLeft leftSorted
         have hnSplit : n = left.length + 1 + right.length := by omega
         -- The compiler forms the right length as `~left.length + n`.
         have hRightSize : ~~~(BitVec.ofNat 64 left.length) + BitVec.ofNat 64 n =
@@ -117,18 +130,20 @@ private theorem quicksort_words_aux (prog : Program) (entry : Addr)
           bv_arith
         wp_steps
         wp_call rightOk ()
-        have hsorted : Spec.quicksort left ++ pivot :: Spec.quicksort right =
-            Spec.quicksort (pivot :: tail) :=
-          Spec.eq_quicksort_of_sorts (Spec.sorts_partition partitioned leftBound rightBound
-            (Spec.quicksort_sorts left) (Spec.quicksort_sorts right))
+        revert w
+        intro sortedRight rightSorted
+        have hsorted := Spec.sorts_partition partitioned leftBound rightBound leftSorted rightSorted
         wp_steps
         apply SepWP.done (by wp_norm_lhs) (by wp_norm_lhs)
         refine ⟨?_, ?_, ?_⟩
         · intro hm
           -- Join the two sorted slices with the pivot and return the stack region.
           rw [hsp_sf_1, hsp_sf] at hm
-          rw [← hsorted, pointsToBytes_append, (Spec.quicksort_sorts left).2.length_eq,
-            pointsToBytes_cons_off, hstack]
+          rw [sepExists_sepConj_left, satisfies_sepExists]
+          refine ⟨sortedLeft ++ pivot :: sortedRight, ?_⟩
+          rw [sepConj_assoc, satisfies_pure_sepConj]
+          refine ⟨hsorted, ?_⟩
+          rw [pointsToBytes_append, leftSorted.2.length_eq, pointsToBytes_cons_off, hstack]
           simp (disch := decide) only [ProofLib.cells_sub_succ, Nat.reduceSub, ProofLib.cells_zero,
             sepConj_emp, sepExists_sepConj_right, sepExists_sepConj_left]
           sep_entail
