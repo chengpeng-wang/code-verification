@@ -1,51 +1,51 @@
-# Example 02 — C 快速排序的 ARM64 证明
+# Example 02 — ARM64 Proof of C Quicksort
 
-## 先审阅证明目标
+## Review the Proof Goal
 
-从 [`QuicksortBinary.lean`](QuicksortBinary.lean) 的 `quicksort_returns_sorted` 开始。先看 `:= by` 前面的定理声明，核对它的前提、执行对象和保证是否符合你想验证的性质。
+Start with `quicksort_returns_sorted` in [`QuicksortBinary.lean`](QuicksortBinary.lean). Read the theorem statement before `:= by` and check its assumptions, the code it executes, and its guarantees.
 
-| 审阅项 | 在主定理中核对什么 |
+| Review item | What to check in the main theorem |
 | --- | --- |
-| 验证对象 | `Steps (program initial.pc) initial final` 使用从 C 编译、链接出的实际 ARM64 字节。 |
-| 输入与输出 | `input` 描述初始 `X0` 指向的数组，`X1` 提供长度 `n`。`output` 从最终内存的原数组地址读回 `n` 个字节。 |
-| 排序正确性 | `Spec.Sorts input output` 同时要求输出按无符号字节值升序排列，并保留输入中每个值的出现次数。 |
-| 正常返回 | `Steps` 和 `Returned` 一起保证有限步内返回到初始 `LR`，机器状态为 `.Running`。 |
-| 调用约定与内存 | `CallingConventionPreserved` 保证恢复 `SP` 和被调用者保存的寄存器。最终内存满足原地址存有输出、栈区域可用以及调用者的 `frame` 断言。 |
+| Code under verification | `Steps (program initial.pc) initial final` runs the actual ARM64 bytes compiled and linked from C. |
+| Input and output | `input` describes the array at the initial `X0`, and `X1` supplies its length `n`. `output` reads `n` bytes from the original array address in the final memory. |
+| Sorting correctness | `Spec.Sorts input output` requires the output to be in ascending order by unsigned byte value and to preserve the multiplicity of each input value. |
+| Normal return | `Steps` and `Returned` guarantee a return to the initial `LR` in finitely many steps, with the machine still `.Running`. |
+| Calling convention and memory | `CallingConventionPreserved` guarantees that `SP` is restored and callee-saved registers are preserved. In the final memory, the output occupies the original array address, the stack region is writable, and the caller's `frame` assertion still holds. |
 
-排序性质写在 [`QuicksortSpec.lean`](QuicksortSpec.lean) 中。
+[`QuicksortSpec.lean`](QuicksortSpec.lean) defines the sorting property.
 
 ```lean
 def Sorts (input output : List (BitVec width)) : Prop :=
   output.Pairwise (· ≤ ·) ∧ output.Perm input
 ```
 
-例如 `[7, 2, 7]` 排成 `[2, 7, 7]` 同时满足两项。`[2, 2, 7]` 满足升序要求，但改变了值的出现次数。`quicksort_returns_sorted` 对机器实际写出的数组直接证明这两项。
+For input `[7, 2, 7]`, the output `[2, 7, 7]` satisfies both conditions. The output `[2, 2, 7]` is sorted and has different multiplicities. `quicksort_returns_sorted` establishes both conditions for the array the machine actually writes.
 
-## 调用前提
+## Call Assumptions
 
-- 初始机器状态为 `.Running`。`CodeLoaded` 要求代码从初始 `PC` 起完整装载在可执行内存中，入口按 4 字节对齐。
-- 初始 `X0` 指向存有 `input` 的连续可读写内存，`X1` 等于 `input.length`。定理量化任意满足这些前提的输入，包括空数组和含重复值的数组。
-- 初始 `SP` 按 16 字节对齐，且其下方有 `48 * n` 字节的可写栈空间，满足 `48 * n ≤ 2^64`。这是证明采用的充分预算，每次进入递归分支的调用使用 48 字节。调用结束时归还该可写区域，执行期间栈内字节可以用作临时存储。
-- 数组、栈和调用者的 `frame` 通过 `∗` 组合，要求它们占用的可写内存彼此分离。
+- The initial machine state is `.Running`. `CodeLoaded` requires the full program to be loaded into executable memory starting at the initial `PC`, with a 4-byte-aligned entry point.
+- The initial `X0` points to contiguous readable and writable memory containing `input`, and `X1` equals `input.length`. The theorem covers every input that satisfies the assumptions, including empty arrays and arrays with repeated values.
+- The initial `SP` is 16-byte aligned and has `48 * n` bytes of writable stack space below it, with `48 * n ≤ 2^64`. This budget suffices because each call that takes the recursive branch uses 48 bytes. The region is writable again on return, and its bytes may be used for temporary storage during execution.
+- Separating conjunction `∗` combines the array, stack, and caller's `frame`, requiring their writable regions to be disjoint.
 
-## 从 C 到机器码证明
+## From C to the Machine-Code Proof
 
-[`quicksort.c`](quicksort.c) 的入口是 `quicksort_u8(a, n)`。长度为 0 或 1 时直接返回。[`quicksort_partition.c`](quicksort_partition.c) 取首元素作枢轴，将小于它的元素分到左边，大于或等于它的元素分到右边。
+[`quicksort.c`](quicksort.c) defines the entry point `quicksort_u8(a, n)`, which returns immediately for lengths 0 and 1. [`quicksort_partition.c`](quicksort_partition.c) uses the first element as the pivot, placing smaller elements on the left and elements greater than or equal to the pivot on the right.
 
-1. [`QuicksortPartition.lean`](QuicksortPartition.lean) 证明实际分区指令有限步内返回，数组仍是输入的一个排列，返回的 `X0` 是枢轴索引，且左右两段满足各自的比较条件。
-2. [`QuicksortMachine.lean`](QuicksortMachine.lean) 用长度归纳验证两次递归调用。两个子数组都更短。证明用这两次调用写回的左右段和枢轴，直接推出整个数组满足 `Sorts`。
-3. [`QuicksortBinary.lean`](QuicksortBinary.lean) 核对这两段指令与链接出的 184 个字节相符，再把机器码契约展开为对实际执行及内存读回的定理。
+1. [`QuicksortPartition.lean`](QuicksortPartition.lean) proves that the actual partition instructions return in finitely many steps. The array remains a permutation of the input, the returned `X0` contains the pivot index, and the two partitions satisfy their comparison conditions.
+2. [`QuicksortMachine.lean`](QuicksortMachine.lean) uses induction on the array length to verify the two recursive calls, each on a shorter subarray. It combines the subarrays written by those calls with the pivot to show that the full array satisfies `Sorts`.
+3. [`QuicksortBinary.lean`](QuicksortBinary.lean) checks that both instruction sequences match the 184 linked bytes, then derives a theorem about actual execution and memory readback from the machine-code contract.
 
-如果别的例子采用「程序输出等于参考实现输出」的规格，审阅时还要找参考实现满足目标性质的定理。两份证据合起来才能把性质传给被验证的程序。
+If another example specifies that the program must produce the same output as a reference implementation, also locate the theorem showing that the reference implementation satisfies the intended property. The two proofs together establish the property for the program under verification.
 
-## 复查证明
+## Recheck the Proof
 
-在 `DeepMindDemo` 目录运行以下命令。
+Run the following command from the repository root.
 
 ```bash
 ./playground/example02-c/check.sh
 ```
 
-需要 Clang、`llvm-objcopy`、`llvm-objdump`、Lean/Lake 和支持 AArch64 的 `ld.lld`。找不到 `ld.lld` 时，脚本尝试使用本机 Rust stable 工具链中的 `rust-lld`。本例使用 Clang 18.1.3 的 ARMv8-A、`-O1` 产物开发。
+The script requires Clang, `llvm-objcopy`, `llvm-objdump`, Lean/Lake, and an `ld.lld` that supports AArch64. If `ld.lld` is unavailable, the script tries `rust-lld` from the local stable Rust toolchain. This example was developed with Clang 18.1.3 targeting ARMv8-A at `-O1`.
 
-脚本重新编译和链接，解析一次分区调用和两次递归调用的 `bl` 目标，核对字节后运行 Lean。生成的 `build/quicksort_u8.asm` 是反汇编，`build/quicksort_u8.elf` 是链接产物，`build/quicksort_u8.bin` 是 Lean 读取的 `.text` 原始字节。修改 C 或编译选项改变了机器码时，脚本会在长度或指令字核对时指出差异。
+The script recompiles and links the program, resolves the `bl` targets for the partition call and the two recursive calls, and checks the bytes before running Lean. It writes the disassembly to `build/quicksort_u8.asm`, the linked ELF to `build/quicksort_u8.elf`, and the raw `.text` bytes that Lean reads to `build/quicksort_u8.bin`. If changes to the C source or compiler flags change the machine code, the length or instruction-word check reports the mismatch.

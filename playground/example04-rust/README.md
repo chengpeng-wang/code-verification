@@ -1,39 +1,39 @@
 # Example 04 · Rust Hoare Quickselect
 
-## 先审阅证明目标
+## Review the Proof Goal
 
-主定理 [`quickselect_worst_case`](QuickselectWorstCase.lean) 同时给出实际 ARM64 执行的上界和同阶下界。令 `r = 2^⌊log₉ n⌋`。对每个合法调用，函数在至多 `floor(960 * n² / r)` 条指令后正常返回。对每个可合法调用且至少为 9 的长度 `n`，存在一个输入，其首次正常返回的指令数 `count` 满足 `n² ≤ 2 * count * r`。两条不等式给出的最坏阶是 `Θ(n^(2−log₉ 2))`，常数 960 和 1/2 是本证明采用的界。
+The main theorem, [`quickselect_worst_case`](QuickselectWorstCase.lean), gives matching upper and lower bounds for actual ARM64 execution. Let `r = 2^⌊log₉ n⌋`. Every valid call returns normally within `floor(960 * n² / r)` instructions. For each feasible length `n ≥ 9`, there is an input whose first normal return takes `count` instructions with `n² ≤ 2 * count * r`. The bounds give a worst-case growth rate of `Θ(n^(2−log₉ 2))`, with upper and lower constants of 960 and 1/2.
 
-[QuickselectSpec.lean](QuickselectSpec.lean) 定义了定理的输入前提和输出保证。代码地址、数组地址、栈顶和返回地址由调用状态给出。样例为了复现才选定具体地址。
+[`QuickselectSpec.lean`](QuickselectSpec.lean) defines the call assumptions and return guarantees. The call state supplies the code address, array address, stack pointer, and return address. The sample runs use fixed addresses for reproducibility.
 
-| Lean 定义 | 审阅内容 |
+| Lean definition | What to review |
 | --- | --- |
-| `ValidCall` | `X0` 指向可读写、对齐且不回绕的 `i64` 数组，`X1 = n`，`X2 = k < n`。整个数组字节数小于 `2^63`。分离逻辑要求数组、栈和调用者保留的内存互不重叠。 |
-| `FirstReturn` | 从入口到第一次到达调用者地址，每条执行的 ARM64 指令计一步，包括最后的 `RET`。返回时处理器仍在运行，栈指针恢复。 |
-| `WorstCaseUpper` | 对每个合法调用，存在满足预算的首次正常返回。 |
-| `WorstCaseLower` | 对每个可合法调用且至少为 9 的长度，存在输入和目标秩，使首次正常返回达到下界。 |
-| `Selects` | 描述所选位置的功能性质。输出是输入的排列，按有符号比较，目标位置左侧的值不大于选中值，右侧的值不小于选中值。 |
+| `ValidCall` | `X0` points to a readable, writable, aligned `i64` array whose address range does not wrap. `X1 = n` and `X2 = k < n`. The array occupies fewer than `2^63` bytes. Separation logic requires the array, stack, and caller's reserved memory to be disjoint. |
+| `FirstReturn` | Every ARM64 instruction from entry to the first visit to the caller's address counts as one step, including the final `RET`. On return, the processor is still running and the stack pointer is restored. |
+| `WorstCaseUpper` | Every valid call has a first normal return within the instruction budget. |
+| `WorstCaseLower` | For each feasible length of at least 9, some input and target rank attain the lower bound at the first normal return. |
+| `Selects` | Specifies the property of the selected position. The output is a permutation of the input. Under signed comparison, values to the left of the target position are at most the selected value, and values to the right are at least the selected value. |
 
-## Rust 改写
+## Rust Adaptation
 
-[quickselect.rs](quickselect.rs) 来自同一工作区的 `PV-playground/src/experiments/EXP-006-complexity/source/original.rs`，选用 Hoare 版本并实例化为有符号 `i64` 和 `<`。枢轴抽样位置、三数取中、两端扫描、交换顺序和搜索区间的更新沿用原程序。
+[`quickselect.rs`](quickselect.rs) comes from `PV-playground/src/experiments/EXP-006-complexity/source/original.rs` in the same workspace. It uses the Hoare variant with signed `i64` values and `<` comparisons. It retains the original pivot sample positions, median-of-three selection, scans from both ends, swap order, and search interval updates.
 
-源码把切片索引、交换和切片分割改为带 `Option` 的显式检查。合法调用下，抽样块始终位于活跃切片内，分区读写前有游标界，每轮把目标秩留在下一段内。检查只给这些操作增加常数工作，保留比较次数、交换次数及区间序列，因而保留渐近复杂度。差分检查覆盖了 84,444 个调用，比较了整个原地数组和所选元素。输入切片和目标秩的要求见导出函数的安全契约。域外的目标秩可能提前返回。
+The Rust code uses explicit `Option` checks for slice indexing, swaps, and splitting. For a valid call, the sample blocks lie in the active slice, cursor bounds are checked before partition reads and writes, and each round keeps the target rank in the next active range. These checks add constant work per operation while preserving the number of comparisons and swaps and the sequence of active ranges. The asymptotic complexity therefore stays the same. Differential testing covered 84,444 calls and compared the entire array after in-place selection along with the selected element. The exported function's safety contract specifies the requirements on the input slice and target rank. An out-of-range rank may cause an early return.
 
-## 证明如何接到机器码
+## Connecting the Proof to the Machine Code
 
-1. [QuickselectMachine.lean](QuickselectMachine.lean) 从链接后 `.text` 直接嵌入 804 个字节，并用 SHA-256 固定字节序列。[QuickselectSanity.lean](QuickselectSanity.lean) 检查全部 201 条指令的解码和静态控制流，并用 ARM64 语义跑五组样例。
-2. [QuickselectPivotMachine.lean](QuickselectPivotMachine.lean) 证明机器码的递归枢轴选择。每次递归调用计入自己的指令数，并保留调用约定和不属于其栈帧的内存。[QuickselectPivot.lean](QuickselectPivot.lean) 将选中的枢轴转换为两侧秩界。
-3. [QuickselectPartitionScan.lean](QuickselectPartitionScan.lean) 和 [QuickselectPartitionInvariant.lean](QuickselectPartitionInvariant.lean) 证明机器码的两端扫描和交换，给出扫描步数界，并用重复值计数证明分区足以缩短下一轮的活跃区间。
-4. [QuickselectRounds.lean](QuickselectRounds.lean) 将枢轴选择、分区、区间更新和返回接成实际指令轮次。[QuickselectUpper.lean](QuickselectUpper.lean) 用区间长度归纳证明所有合法调用都会返回，再用 [QuickselectCost.lean](QuickselectCost.lean) 的势函数递推得到总上界。
-5. [QuickselectAdversary.lean](QuickselectAdversary.lean) 逐轮逆向构造输入，使枢轴恰好淘汰 `r` 个元素，并让保留的后缀进入下一轮的构造。[QuickselectAdversaryMachine.lean](QuickselectAdversaryMachine.lean) 将实际扫描接到这个分区关系。[QuickselectLower.lean](QuickselectLower.lean) 将构造的数组放进任意可行布局，并用同一份机器码的计步轨迹证明下界。
+1. [`QuickselectMachine.lean`](QuickselectMachine.lean) embeds the 804 bytes of the linked `.text` section directly and pins the byte sequence with SHA-256. [`QuickselectSanity.lean`](QuickselectSanity.lean) checks decoding and static control flow for all 201 instructions and runs five sample cases under the ARM64 semantics.
+2. [`QuickselectPivotMachine.lean`](QuickselectPivotMachine.lean) verifies recursive pivot selection in the binary. Each recursive call accounts for its own instructions and preserves the calling convention and memory outside its stack frame. [`QuickselectPivot.lean`](QuickselectPivot.lean) turns the selected pivot into rank bounds on both sides.
+3. [`QuickselectPartitionScan.lean`](QuickselectPartitionScan.lean) and [`QuickselectPartitionInvariant.lean`](QuickselectPartitionInvariant.lean) verify the scans and swaps and bound the number of scan steps. They count duplicate values to prove that partitioning shortens the active range for the next round.
+4. [`QuickselectRounds.lean`](QuickselectRounds.lean) combines pivot selection, partitioning, range updates, and return into rounds of machine execution. [`QuickselectUpper.lean`](QuickselectUpper.lean) proves by induction on the active range length that every valid call returns, then uses the potential recurrence in [`QuickselectCost.lean`](QuickselectCost.lean) to derive the total upper bound.
+5. [`QuickselectAdversary.lean`](QuickselectAdversary.lean) constructs the input backward, round by round, so that each pivot eliminates exactly `r` elements and the retained suffix feeds into the construction for the next round. [`QuickselectAdversaryMachine.lean`](QuickselectAdversaryMachine.lean) relates the actual scans to this partition relation. [`QuickselectLower.lean`](QuickselectLower.lean) places the constructed array in any feasible layout and uses the counted execution trace of the same binary to prove the lower bound.
 
-## 复现
+## Reproduce the Results
 
-在 `DeepMindDemo` 目录运行以下命令。已在 x86-64 Linux 上复现。需要 Rust 1.98.1、目标 `aarch64-unknown-linux-gnu`、LLVM 二进制工具和仓库指定的 Lean/Lake。
+Run the following command from the repository root. The example has been reproduced on x86-64 Linux. It requires Rust 1.98.1, the `aarch64-unknown-linux-gnu` target, LLVM binary tools, and the Lean/Lake version pinned in the repository.
 
 ```bash
 ./playground/example04-rust/check.sh
 ```
 
-只运行交叉编译、机器码检查及样例时加 `--sanity-only`。脚本把 ELF、反汇编和 Lean 读取的原始 `.text` 字节分别写到 `build/quickselect.elf`、`build/quickselect.asm` 和 `build/quickselect.bin`。
+Pass `--sanity-only` to cross-compile, check the machine code, and run the sample cases. The script writes the linked ELF to `build/quickselect.elf`, the disassembly to `build/quickselect.asm`, and the raw `.text` bytes that Lean reads to `build/quickselect.bin`.

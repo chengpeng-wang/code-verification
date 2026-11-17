@@ -1,53 +1,53 @@
 # AlphaProof Code Playground
 
-新增验证例子时，先在规格和主定理旁注释要证明的性质，再在该例子的 README 中列出供审阅的主定理、输入前提、实际输出和保证。提交证明结果时指出这些位置，方便先核对目标，再检查证明。
+When adding a verification example, document the property being proved next to the specification and main theorem. In the example's README, list the main theorem, its input assumptions, the program's actual output, and the guarantees to review. When submitting proof results, point reviewers to these locations so they can check the goal before reading the proof.
 
 ## Example 1 — C
 
-用 ARM64 机器语义证明 [`store_byte.c`](example01-c/store_byte.c) 编译出来的函数会把参数 `value` 写到 `*dst`，保留相邻的一个字节，然后返回调用者。
+Use the ARM64 machine semantics to prove that the function compiled from [`store_byte.c`](example01-c/store_byte.c) writes its `value` argument to `*dst`, preserves the adjacent byte, and returns to the caller.
 
-在 `DeepMindDemo` 目录运行。需要 Clang、`llvm-objcopy`、`llvm-objdump` 和由仓库 `lean-toolchain` 指定的 Lean/Lake。当前实验在 x86_64 Linux 上交叉编译。
+Run the following command from the repository root. It requires Clang, `llvm-objcopy`, `llvm-objdump`, and the Lean/Lake version pinned in `lean-toolchain`. The example was cross-compiled on x86-64 Linux.
 
 ```bash
 ./playground/example01-c/check.sh
 ```
 
-脚本每次都会重新编译 C，然后重查 Lean 证明。第一次运行时，Lake 会先构建所需的本地 ARM64 库。
+The script recompiles the C source and checks the Lean proof on every run. On the first run, Lake builds the required local ARM64 library.
 
 ```text
-store_byte.c  ── Clang ──▶  AArch64 ELF 对象文件 (.o)
-                               │ 提取 .text.store_byte
-                               ▼
-                         函数的 8 个机器码字节
-                               │ Lean 的 include_bytes%
-                               ▼
-                    装入可执行内存，按 PC 取指并执行
-                               │ Arm64.Step + Arm64.Steps
-                               ▼
-                     验证目标字节、相邻字节和返回地址
+store_byte.c ── Clang ──▶ AArch64 ELF object file (.o)
+                                  │ Extract .text.store_byte
+                                  ▼
+                         8 bytes of machine code
+                                  │ Lean's include_bytes%
+                                  ▼
+                 Load executable memory, then fetch and execute at PC
+                                  │ Arm64.Step + Arm64.Steps
+                                  ▼
+                 Verify the target byte, adjacent byte, and return address
 ```
 
-1. [`check.sh`](example01-c/check.sh) 使用 `clang --target=aarch64-linux-gnu -O2 -c` 生成对象文件，并将函数单独放进 `.text.store_byte` 节。`llvm-objcopy` 提取该节的真实字节。当前产物是 `strb w1, [x0]` 和 `ret`。
-2. [`Example01C.lean`](example01-c/Example01C.lean) 直接读入提取的字节，调用库里的 `loadCodeMem` 装载程序。初始机器状态把目标指针放在 `X0`，待写字节放在 `X1` 的低位，返回地址放在 `LR`。实验固定代码、数据和返回地址，旧字节、待写字节以及相邻字节都由定理任意量化。
-3. `store_byte_correct` 构造两个 `Arm64.Step`，并用 `Arm64.Steps` 把它们接起来。每一步都必须由模型从内存中成功取指。取指证明里的 `change` 由 Lean 检查数据字节是否与取指无关，因此取指可以用具体值计算，整个定理仍适用于任意输入字节。最后证明目标字节等于 `value`，相邻字节等于原值，`PC` 等于返回地址，处理器状态仍为 `.Running`。
+1. [`check.sh`](example01-c/check.sh) uses `clang --target=aarch64-linux-gnu -O2 -c` to compile the function into its own `.text.store_byte` section. `llvm-objcopy` extracts the section bytes, which encode `strb w1, [x0]` and `ret`.
+2. [`Example01C.lean`](example01-c/Example01C.lean) reads the extracted bytes and loads them with the library's `loadCodeMem` function. In the initial machine state, `X0` holds the destination pointer, the low byte of `X1` holds the value to write, and `LR` holds the return address. The example fixes the code, data, and return addresses. The theorem quantifies over the original destination byte, the value to write, and the adjacent byte.
+3. `store_byte_correct` constructs two `Arm64.Step` transitions and combines them with `Arm64.Steps`. The model must successfully fetch each instruction from memory. In the fetch proofs, Lean checks through `change` that the fetch is independent of the data bytes, so it can compute the fetch with concrete values while the theorem covers arbitrary input bytes. The final state has `value` at the destination, the original value at the adjacent byte, the return address in `PC`, and processor status `.Running`.
 
-通过时，输出末尾会显示 `Example01C.store_byte_correct` 只依赖 Lean 的标准公理 `propext`、`Classical.choice`、`Quot.sound`。
+On success, the final output shows that `Example01C.store_byte_correct` depends only on Lean's standard axioms `propext`, `Classical.choice`, and `Quot.sound`.
 
-可以把 C 函数里的 `*dst = value` 临时改成 `*dst = 0`，再运行脚本。编译器会改写存储指令，Lean 会在第一步取指的证明处报错。把赋值恢复后可以重新通过检查。
+To see the proof catch a change in the program, temporarily replace `*dst = value` with `*dst = 0` and rerun the script. The compiler changes the store instruction, and Lean fails at the first instruction-fetch proof. Restore the original assignment to pass the check again.
 
-## Example 02 — C 快速排序
+## Example 02 — C Quicksort
 
-证明 `quicksort_u8(a, n)` 的 ARM64 机器码会正常返回，并在原数组地址写回输入的升序排列。审阅时先检查主定理中的 `output` 和 `Spec.Sorts input output`。例子目录里的 README 列出了调用前提、返回保证和各证明文件的用途。 [Example 02 的证明目标](example02-c/README.md#先审阅证明目标)
+The proof shows that the ARM64 binary for `quicksort_u8(a, n)` returns normally and writes a sorted permutation of the input back to the original array. Start with `output` and `Spec.Sorts input output` in the main theorem. The example README lists the call assumptions, return guarantees, and roles of the proof files. [Example 02 proof goal](example02-c/README.md#review-the-proof-goal)
 
-在 `DeepMindDemo` 目录运行以下命令。
+Run the following command from the repository root.
 
 ```bash
 ./playground/example02-c/check.sh
 ```
 
-## Example 03 — C 快速排序的最坏复杂度
+## Example 03 — Worst-Case Complexity of C Quicksort
 
-对同一份快排 ARM64 机器码证明首次返回的指令数具有最坏情况二次界。先核对通用上界与全相等输入的下界是否符合要验证的目标。 [Example 03 的证明目标](example03-c/README.md#先审阅证明目标)
+The proof gives a quadratic worst-case bound on the number of instructions through the first return for the same Quicksort ARM64 binary. Review the upper bound for every valid call and the lower bound attained on an all-equal input. [Example 03 proof goal](example03-c/README.md#review-the-proof-goal)
 
 ```bash
 ./playground/example03-c/check.sh
@@ -55,7 +55,7 @@ store_byte.c  ── Clang ──▶  AArch64 ELF 对象文件 (.o)
 
 ## Example 04 — Rust Hoare Quickselect
 
-将原 Hoare Quickselect 改写为可链接、可由 ARM64 模型执行的 Rust 程序。证明这份机器码的最坏指令数具有同阶上下界。 [Example 04 的证明目标](example04-rust/README.md#先审阅证明目标)
+The original Hoare Quickselect is adapted to Rust code that can be linked and run under the ARM64 model. The proof establishes matching upper and lower bounds on the order of growth of the binary's worst-case instruction count. [Example 04 proof goal](example04-rust/README.md#review-the-proof-goal)
 
 ```bash
 ./playground/example04-rust/check.sh
